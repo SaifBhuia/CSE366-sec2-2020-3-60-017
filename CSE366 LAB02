@@ -1,0 +1,173 @@
+import random
+import matplotlib.pyplot as plt
+
+
+# Utility function for random sampling from a distribution
+def sample_from_distribution(distribution):
+    random_value = random.random()
+    cumulative_probability = 0
+    for item, probability in distribution.items():
+        cumulative_probability += probability
+        if random_value < cumulative_probability:
+            return item
+    raise ValueError("Invalid distribution: Probabilities must sum to 1.")
+
+
+# Visualization Class
+class TrendVisualizer:
+    def __init__(self, agent, environment):
+        self.agent = agent
+        self.environment = environment
+
+    def display_trends(self):
+        plt.figure(figsize=(12, 8))
+
+        # Price trend visualization
+        plt.subplot(2, 1, 1)
+        plt.plot(self.environment.price_history, label="Market Price", color="blue", linewidth=2)
+        plt.axhline(
+            y=self.agent.average_price, color="green", linestyle="--", label="Avg Price"
+        )
+        plt.title("Market Price Dynamics")
+        plt.ylabel("Price (BDT)")
+        plt.legend()
+
+        # Stock and purchase trends visualization
+        plt.subplot(2, 1, 2)
+        plt.plot(
+            self.environment.stock_history,
+            label="Stock Level",
+            color="blue",
+            linewidth=2,
+        )
+        plt.bar(
+            range(len(self.agent.purchase_log)),
+            self.agent.purchase_log,
+            label="Purchases",
+            color="orange",
+            alpha=0.7,
+        )
+        plt.title("Stock Levels and Purchases")
+        plt.ylabel("Units")
+        plt.xlabel("Time Steps")
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
+
+
+# Market Environment
+class MarketSimulator:
+    price_fluctuations = [15, -25, 10, -10, 5, 30, -35, 25, -5, 5]
+    noise_std_dev = 6
+
+    def __init__(self):
+        self.current_time = 0
+        self.stock = 50
+        self.price = 600
+        self.stock_history = [self.stock]
+        self.price_history = [self.price]
+
+    def initialize_state(self):
+        return {"price": self.price, "stock": self.stock}
+
+    def update_state(self, action):
+        daily_sales = sample_from_distribution({3: 0.2, 5: 0.3, 7: 0.3, 10: 0.2})
+        purchased_units = action.get("purchase", 0)
+        self.stock = max(0, self.stock + purchased_units - daily_sales)
+        self.current_time += 1
+        self.price += (
+            self.price_fluctuations[self.current_time % len(self.price_fluctuations)]
+            + random.gauss(0, self.noise_std_dev)
+        )
+        self.stock_history.append(self.stock)
+        self.price_history.append(self.price)
+        return {"price": self.price, "stock": self.stock}
+
+
+# Controllers
+class DiscountChecker:
+    def __init__(self, agent, discount_threshold=0.2):
+        self.agent = agent
+        self.discount_threshold = discount_threshold
+
+    def is_discount_available(self, state):
+        return state["price"] < (1 - self.discount_threshold) * self.agent.average_price
+
+
+class StockChecker:
+    def __init__(self, low_stock_limit=10):
+        self.low_stock_limit = low_stock_limit
+
+    def is_stock_depleted(self, state):
+        return state["stock"] < self.low_stock_limit
+
+
+class PurchaseManager:
+    def __init__(self, discount_checker, stock_checker):
+        self.discount_checker = discount_checker
+        self.stock_checker = stock_checker
+
+    def evaluate_order(self, state):
+        if self.discount_checker.is_discount_available(state) and not self.stock_checker.is_stock_depleted(state):
+            discount_percentage = (self.discount_checker.agent.average_price - state["price"]) / self.discount_checker.agent.average_price
+            units_to_order = int(20 * (1 + discount_percentage))
+            print(f"Discount found! Discount ratio: {discount_percentage:.2f}. Placing order for {units_to_order} units.")
+            return units_to_order
+        elif self.stock_checker.is_stock_depleted(state):
+            print("Low stock detected. Placing an order for 15 units.")
+            return 15
+        print("No action taken: Market conditions stable.")
+        return 0
+
+
+# Agent
+class IntelligentAgent:
+    def __init__(self):
+        self.average_price = 600
+        self.purchase_log = []
+        self.total_spent = 0
+
+        # Decision-making components
+        self.discount_checker = DiscountChecker(self)
+        self.stock_checker = StockChecker()
+        self.purchase_manager = PurchaseManager(self.discount_checker, self.stock_checker)
+
+    def make_decision(self, state):
+        self.average_price += (state["price"] - self.average_price) * 0.1
+
+        units_to_order = self.purchase_manager.evaluate_order(state)
+
+        self.total_spent += units_to_order * state["price"]
+        self.purchase_log.append(units_to_order)
+
+        print(f"Step {len(self.purchase_log)}:")
+        print(f"Price: {state['price']:.0f}, Stock: {state['stock']}")
+        print(f"Updated Avg Price: {self.average_price:.0f}")
+        print(f"Order: {units_to_order} units\n")
+        return {"purchase": units_to_order}
+
+
+# Simulation Runner
+class Simulation:
+    def __init__(self, agent, environment):
+        self.agent = agent
+        self.environment = environment
+        self.current_state = self.environment.initialize_state()
+
+    def run(self, steps):
+        for _ in range(steps):
+            action = self.agent.make_decision(self.current_state)
+            self.current_state = self.environment.update_state(action)
+
+
+if __name__ == "__main__":
+    # Initialize the components
+    environment = MarketSimulator()
+    agent = IntelligentAgent()
+    simulation = Simulation(agent, environment)
+
+    # Run simulation and display results
+    simulation.run(20)
+    visualizer = TrendVisualizer(agent, environment)
+    visualizer.display_trends()
